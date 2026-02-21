@@ -6,9 +6,9 @@ You have access to **three execution environments** and **composable decorators*
 
 | Environment | Tool Prefix | Backend | Best For |
 |-------------|------------|---------|----------|
-| **Local** | `env.local.*` | Host filesystem + shell | Simple tasks, file editing, scripting |
-| **Docker** | `env.docker.*` | Container via `containers` bundle | Isolated builds, untrusted code, reproducible envs |
-| **SSH** | `env.ssh.*` | Remote host via asyncssh/SFTP | Remote servers, GPU hardware, production ops |
+| **Local** | `env_local_*` | Host filesystem + shell | Simple tasks, file editing, scripting |
+| **Docker** | `env_docker_*` | Container via `containers` bundle | Isolated builds, untrusted code, reproducible envs |
+| **SSH** | `env_ssh_*` | Remote host via asyncssh/SFTP | Remote servers, GPU hardware, production ops |
 
 ## Choosing an Environment
 
@@ -23,17 +23,17 @@ Every environment provides these tools with identical schemas:
 
 | Tool | Purpose |
 |------|---------|
-| `env.{env}.read_file` | Read file content (supports offset/limit) |
-| `env.{env}.write_file` | Write file content (creates parent dirs) |
-| `env.{env}.edit_file` | Replace exact string in file |
-| `env.{env}.exec` | Execute shell command |
-| `env.{env}.grep` | Search file contents with regex |
-| `env.{env}.glob` | Find files by glob pattern |
-| `env.{env}.list_dir` | List directory entries |
-| `env.{env}.file_exists` | Check if path exists |
+| `env_{env}_read_file` | Read file content (supports offset/limit) |
+| `env_{env}_write_file` | Write file content (creates parent dirs) |
+| `env_{env}_edit_file` | Replace exact string in file |
+| `env_{env}_exec` | Execute shell command |
+| `env_{env}_grep` | Search file contents with regex |
+| `env_{env}_glob` | Find files by glob pattern |
+| `env_{env}_list_dir` | List directory entries |
+| `env_{env}_file_exists` | Check if path exists |
 
-When only one environment is loaded, tools use the `env.*` prefix (no qualifier).
-When multiple environments are loaded, each uses its qualified prefix: `env.local.*`, `env.docker.*`, `env.ssh.*`.
+When only one environment is loaded, tools use the `env_*` prefix (no qualifier).
+When multiple environments are loaded, each uses its qualified prefix: `env_local_*`, `env_docker_*`, `env_ssh_*`.
 
 ## Environment-Specific Extensions
 
