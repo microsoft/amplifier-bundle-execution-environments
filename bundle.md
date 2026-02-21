@@ -10,14 +10,7 @@ bundle:
     Each environment provides the same 8 env.* tools with environment-specific backends.
 
 includes:
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-local@main
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-docker@main
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-ssh@main
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-decorators@main
-
-context:
-  include:
-    - env-all:context/env-all-guide.md
+  - bundle: env-all:behaviors/env-all
 ---
 
 # env-all
@@ -39,4 +32,10 @@ and cross-cutting decorators in a single bundle.
 Use `env-all` when your agents need access to multiple execution environments in a single
 session. For single-environment use cases, include the specific bundle directly instead.
 
-See `context/env-all-guide.md` for the multi-environment agent guide.
+## As an App Bundle
+
+Add the behavior to compose onto every session:
+
+```bash
+amplifier bundle add "git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=behaviors/env-all.yaml" --app
+```
