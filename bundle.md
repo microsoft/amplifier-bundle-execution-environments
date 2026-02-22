@@ -1,13 +1,13 @@
 ---
 bundle:
   name: env-all
-  version: 0.1.0
+  version: 0.2.0
   description: |
-    Complete execution environment toolkit — includes all environments and decorators.
+    Instance-based execution environment toolkit.
     
-    Composes env-local, env-docker, env-ssh, and env-decorators into a single bundle
-    for teams that want the full set of execution environments available to agents.
-    Each environment provides the same 8 env.* tools with environment-specific backends.
+    Provides 11 tools for creating and managing named environment instances on demand.
+    The agent creates Docker containers, SSH connections, or local directories,
+    targets specific instances by name, and destroys them when done.
 
 includes:
   - bundle: env-all:behaviors/env-all
@@ -15,27 +15,29 @@ includes:
 
 # env-all
 
-Complete execution environment toolkit for Amplifier. Includes all environment backends
-and cross-cutting decorators in a single bundle.
+Instance-based execution environment toolkit for Amplifier.
 
-## What's Included
+## Tools Provided (11)
 
-| Bundle | Purpose |
-|--------|---------|
-| `env-local` | Local filesystem and shell execution (reference implementation) |
-| `env-docker` | Container-isolated execution via Docker |
-| `env-ssh` | Remote execution via SSH/SFTP |
-| `env-decorators` | Logging, ReadOnly, AuditTrail decorators for any environment |
+| Tool | Purpose |
+|------|---------|
+| `env_create` | Create a new environment instance (local, docker, ssh) |
+| `env_destroy` | Tear down an environment instance |
+| `env_list` | List all active environment instances |
+| `env_exec` | Execute command in a named instance |
+| `env_read_file` | Read file from a named instance |
+| `env_write_file` | Write file to a named instance |
+| `env_edit_file` | Edit file in a named instance |
+| `env_grep` | Search files in a named instance |
+| `env_glob` | Find files in a named instance |
+| `env_list_dir` | List directory in a named instance |
+| `env_file_exists` | Check path in a named instance |
 
-## When to Use
+## How It Works
 
-Use `env-all` when your agents need access to multiple execution environments in a single
-session. For single-environment use cases, include the specific bundle directly instead.
+1. A "local" instance is auto-created at session start
+2. Agent calls `env_create(type="docker", name="build")` to spin up more
+3. Agent targets instances: `env_exec(instance="build", command="cargo build")`
+4. All instances are destroyed at session end (unless persistent)
 
-## As an App Bundle
-
-Add the behavior to compose onto every session:
-
-```bash
-amplifier bundle add "git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=behaviors/env-all.yaml" --app
-```
+See `context/env-all-guide.md` for the full agent guide.

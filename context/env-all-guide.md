@@ -1,65 +1,74 @@
-# Multi-Environment Guide
+# Environment Toolkit
 
-You have access to **three execution environments** and **composable decorators**. All environments share the same 8-tool interface — learn once, use everywhere.
+You have 11 `env_*` tools for working with local files, Docker containers, and remote SSH hosts.
 
-## Available Environments
+## Key Concept: Instances
 
-| Environment | Tool Prefix | Backend | Best For |
-|-------------|------------|---------|----------|
-| **Local** | `env_local_*` | Host filesystem + shell | Simple tasks, file editing, scripting |
-| **Docker** | `env_docker_*` | Container via `containers` bundle | Isolated builds, untrusted code, reproducible envs |
-| **SSH** | `env_ssh_*` | Remote host via asyncssh/SFTP | Remote servers, GPU hardware, production ops |
+Every tool takes an `instance` parameter that targets a named environment. A **"local"** instance exists by default — no setup needed for host operations. Create additional instances on demand with `env_create`.
 
-## Choosing an Environment
+## Tools
 
-- **Default to local** for file reads, edits, and simple commands.
-- **Use Docker** when you need isolation (untrusted code, dependency conflicts, clean builds).
-- **Use SSH** when the work must happen on a specific remote machine (GPU server, staging host).
-- **Combine them** for cross-environment workflows (read locally, build in Docker, deploy via SSH).
+| Tool | Purpose | Key Params |
+|------|---------|------------|
+| `env_create` | Create a new environment instance | type (local/docker/ssh), name, + type-specific |
+| `env_destroy` | Tear down an instance | instance |
+| `env_list` | List all active instances | (none) |
+| `env_exec` | Execute shell command | instance, command, timeout, workdir |
+| `env_read_file` | Read file content | instance, path, offset, limit |
+| `env_write_file` | Write file content | instance, path, content |
+| `env_edit_file` | Edit file (string replace) | instance, path, old_string, new_string |
+| `env_grep` | Search file contents | instance, pattern, path, glob |
+| `env_glob` | Find files by pattern | instance, pattern, path |
+| `env_list_dir` | List directory | instance, path |
+| `env_file_exists` | Check path exists | instance, path |
 
-## Common Shape (8 Tools)
+The `instance` parameter defaults to `"local"`, so simple calls just work on the host.
 
-Every environment provides these tools with identical schemas:
+## Lifecycle: Create → Use → Destroy
 
-| Tool | Purpose |
-|------|---------|
-| `env_{env}_read_file` | Read file content (supports offset/limit) |
-| `env_{env}_write_file` | Write file content (creates parent dirs) |
-| `env_{env}_edit_file` | Replace exact string in file |
-| `env_{env}_exec` | Execute shell command |
-| `env_{env}_grep` | Search file contents with regex |
-| `env_{env}_glob` | Find files by glob pattern |
-| `env_{env}_list_dir` | List directory entries |
-| `env_{env}_file_exists` | Check if path exists |
+1. **Local** — already there, use it directly
+2. **Create** — `env_create(type="docker", name="build", purpose="python")` for isolation
+3. **Use** — target by name: `env_exec(instance="build", command="pytest")`
+4. **Destroy** — `env_destroy(instance="build")` when done (also auto-destroyed at session end)
 
-When only one environment is loaded, tools use the `env_*` prefix (no qualifier).
-When multiple environments are loaded, each uses its qualified prefix: `env_local_*`, `env_docker_*`, `env_ssh_*`.
+Choose meaningful instance names: "build", "pi", "staging-db", "test-runner".
 
-## Environment-Specific Extensions
+## Example Workflows
 
-Beyond the common 8 tools, each environment offers unique capabilities:
+**Local only** (no setup needed):
+```
+env_exec(command="ls src/")
+env_read_file(path="src/main.py")
+env_edit_file(path="config.yaml", old_string="debug: false", new_string="debug: true")
+```
 
-- **Docker**: `docker.copy_in`, `docker.copy_out`, `docker.container_id`
-- **SSH**: `ssh.reconnect`, `ssh.upload`, `ssh.download`, `ssh.tunnel`
+**Docker isolation:**
+```
+env_create(type="docker", name="build", purpose="python")
+env_exec(instance="build", command="pip install -r requirements.txt")
+env_exec(instance="build", command="pytest tests/")
+env_destroy(instance="build")
+```
 
-## Decorators
+**Remote SSH:**
+```
+env_create(type="ssh", name="pi", host="voicebox", username="bkrabach")
+env_exec(instance="pi", command="uname -a")
+env_read_file(instance="pi", path="/etc/hostname")
+env_destroy(instance="pi")
+```
 
-Decorators wrap any environment's tools via hook-based interception:
+**Multi-environment:**
+```
+env_create(type="docker", name="build", purpose="rust")
+env_create(type="ssh", name="deploy", host="staging.example.com")
+env_exec(instance="build", command="cargo build --release")
+env_exec(instance="deploy", command="systemctl restart app")
+env_destroy(instance="build")
+```
 
-| Decorator | Effect |
-|-----------|--------|
-| **Logging** | Logs all env.* calls with timing — purely observational |
-| **ReadOnly** | Blocks write_file, edit_file, exec — allows reads only |
-| **AuditTrail** | Records all operations to a JSONL audit log |
+## Errors
 
-Decorators apply automatically to all loaded environments. They compose:
-Logging + ReadOnly means writes are blocked AND the block is logged.
-
-## Error Model
-
-All environments return structured errors with two categories:
-
-- **Transport errors** (`retriable: true`): Environment itself is broken — connection lost, daemon down, container stopped. Retry may help.
-- **Operation errors** (`retriable: false`): Work failed within a working environment — file not found, permission denied, command failed. Fix the input.
-
-Every error includes `environment` ("local", "docker", "ssh") so you know which backend failed.
+- **Unknown instance** — error lists active instances so you can pick the right one
+- **Docker without containers tool** — clear error explaining the dependency
+- **SSH missing host** — clear error explaining required connection params

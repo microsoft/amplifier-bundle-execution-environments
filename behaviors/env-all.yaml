@@ -1,13 +1,17 @@
 bundle:
   name: behavior-env-all
-  version: 0.1.0
-  description: All execution environments composed — local, Docker, SSH, and decorators
+  version: 0.2.0
+  description: Instance-based execution environments — create, target, and destroy environments on demand
 
-includes:
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-local@main#subdirectory=behaviors/env-local.yaml
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-docker@main#subdirectory=behaviors/env-docker.yaml
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-ssh@main#subdirectory=behaviors/env-ssh.yaml
-  - bundle: git+https://github.com/bkrabach/amplifier-bundle-env-decorators@main#subdirectory=behaviors/env-decorators.yaml
+tools:
+  - module: tools-env-all
+    source: env-all:modules/tools-env-all
+    config: {}
+
+hooks:
+  - module: hooks-env-all
+    source: env-all:modules/hooks-env-all
+    config: {}
 
 context:
   include:
