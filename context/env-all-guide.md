@@ -13,13 +13,13 @@ Every tool takes an `instance` parameter that targets a named environment. A **"
 | `env_create` | Create a new environment instance | type (local/docker/ssh), name, + type-specific |
 | `env_destroy` | Tear down an instance | instance |
 | `env_list` | List all active instances | (none) |
-| `env_exec` | Execute shell command | instance, command, timeout, workdir |
+| `env_exec` | Execute shell command | instance, command, timeout, workdir, env_vars |
 | `env_read_file` | Read file content | instance, path, offset, limit |
 | `env_write_file` | Write file content | instance, path, content |
 | `env_edit_file` | Edit file (string replace) | instance, path, old_string, new_string |
-| `env_grep` | Search file contents | instance, pattern, path, glob |
+| `env_grep` | Search file contents | instance, pattern, path, glob, case_insensitive, max_results |
 | `env_glob` | Find files by pattern | instance, pattern, path |
-| `env_list_dir` | List directory | instance, path |
+| `env_list_dir` | List directory | instance, path, depth |
 | `env_file_exists` | Check path exists | instance, path |
 
 The `instance` parameter defaults to `"local"`, so simple calls just work on the host.
@@ -66,6 +66,13 @@ env_exec(instance="build", command="cargo build --release")
 env_exec(instance="deploy", command="systemctl restart app")
 env_destroy(instance="build")
 ```
+
+## Advanced Parameters
+
+- **Environment variables:** `env_exec(instance="build", command="cargo build", env_vars={"RUST_LOG": "debug"})`
+- **Recursive listing:** `env_list_dir(instance="build", path="src", depth=3)` (default depth=1)
+- **Case-insensitive grep:** `env_grep(instance="local", pattern="TODO", case_insensitive=true, max_results=10)`
+- **Execution timing:** `env_exec` results include `timed_out` (boolean) and `duration_ms` (wall-clock milliseconds)
 
 ## Errors
 

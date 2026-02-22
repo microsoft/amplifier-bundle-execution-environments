@@ -82,6 +82,10 @@ class EnvExecTool:
                 },
                 "timeout": {"type": "integer", "description": "Timeout in seconds"},
                 "workdir": {"type": "string", "description": "Working directory"},
+                "env_vars": {
+                    "type": "object",
+                    "description": "Environment variables to set (additive merge)",
+                },
             },
             "required": ["command"],
         }
@@ -95,7 +99,10 @@ class EnvExecTool:
             return _missing("command")
         try:
             result = await backend.exec_command(
-                command, timeout=input.get("timeout"), workdir=input.get("workdir")
+                command,
+                timeout=input.get("timeout"),
+                workdir=input.get("workdir"),
+                env_vars=input.get("env_vars"),
             )
             return ToolResult(
                 success=True,
@@ -103,6 +110,8 @@ class EnvExecTool:
                     "stdout": result.stdout,
                     "stderr": result.stderr,
                     "exit_code": result.exit_code,
+                    "timed_out": result.timed_out,
+                    "duration_ms": result.duration_ms,
                 },
             )
         except Exception as e:
@@ -294,6 +303,14 @@ class EnvGrepTool:
                     "type": "string",
                     "description": "Glob pattern to filter files",
                 },
+                "case_insensitive": {
+                    "type": "boolean",
+                    "description": "Case-insensitive search (default: false)",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum matches to return",
+                },
             },
             "required": ["pattern"],
         }
@@ -307,7 +324,11 @@ class EnvGrepTool:
             return _missing("pattern")
         try:
             matches = await backend.grep(
-                pattern, path=input.get("path"), glob_filter=input.get("glob")
+                pattern,
+                path=input.get("path"),
+                glob_filter=input.get("glob"),
+                case_insensitive=input.get("case_insensitive", False),
+                max_results=input.get("max_results"),
             )
             return ToolResult(success=True, output=matches)
         except Exception as e:
@@ -388,6 +409,10 @@ class EnvListDirTool:
             "properties": {
                 "instance": _INSTANCE_SCHEMA,
                 "path": {"type": "string", "description": "Directory path to list"},
+                "depth": {
+                    "type": "integer",
+                    "description": "Directory depth (default: 1, immediate children only)",
+                },
             },
         }
 
@@ -397,7 +422,7 @@ class EnvListDirTool:
             return error
         path = input.get("path", ".")
         try:
-            entries = await backend.list_dir(path)
+            entries = await backend.list_dir(path, depth=input.get("depth", 1))
             return ToolResult(
                 success=True,
                 output=[e.model_dump() for e in entries],

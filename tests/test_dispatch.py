@@ -31,11 +31,26 @@ class FakeBackend:
     def env_type(self) -> str:
         return "fake"
 
+    def working_directory(self) -> str:
+        return "/fake/workdir"
+
+    def platform(self) -> str:
+        return "linux"
+
+    def os_version(self) -> str:
+        return "FakeOS 1.0"
+
     async def exec_command(
-        self, cmd: str, timeout: float | None = None, workdir: str | None = None
+        self,
+        cmd: str,
+        timeout: float | None = None,
+        workdir: str | None = None,
+        env_vars: dict[str, str] | None = None,
     ) -> EnvExecResult:
-        self.calls.append(("exec_command", cmd, timeout, workdir))
-        return EnvExecResult(stdout="ok\n", stderr="", exit_code=0)
+        self.calls.append(("exec_command", cmd, timeout, workdir, env_vars))
+        return EnvExecResult(
+            stdout="ok\n", stderr="", exit_code=0, timed_out=False, duration_ms=42
+        )
 
     async def read_file(
         self, path: str, offset: int | None = None, limit: int | None = None
@@ -54,17 +69,24 @@ class FakeBackend:
         self.calls.append(("file_exists", path))
         return True
 
-    async def list_dir(self, path: str) -> list[EnvFileEntry]:
-        self.calls.append(("list_dir", path))
+    async def list_dir(self, path: str, depth: int = 1) -> list[EnvFileEntry]:
+        self.calls.append(("list_dir", path, depth))
         return [
             EnvFileEntry(name="foo.py", entry_type="file", size=100),
             EnvFileEntry(name="bar", entry_type="dir", size=None),
         ]
 
     async def grep(
-        self, pattern: str, path: str | None = None, glob_filter: str | None = None
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob_filter: str | None = None,
+        case_insensitive: bool = False,
+        max_results: int | None = None,
     ) -> str:
-        self.calls.append(("grep", pattern, path, glob_filter))
+        self.calls.append(
+            ("grep", pattern, path, glob_filter, case_insensitive, max_results)
+        )
         return "src/main.py:10:match\n"
 
     async def glob_files(self, pattern: str, path: str | None = None) -> list[str]:
@@ -170,7 +192,7 @@ class TestEnvExecToolDispatch:
         assert result.success is True
         assert result.output["stdout"] == "ok\n"
         assert result.output["exit_code"] == 0
-        assert fake_backend.calls == [("exec_command", "ls -la", 30, "/tmp")]
+        assert fake_backend.calls == [("exec_command", "ls -la", 30, "/tmp", None)]
 
     def test_default_instance_is_local(
         self, registry: EnvironmentRegistry, fake_backend: FakeBackend
@@ -210,7 +232,7 @@ class TestEnvExecToolDispatch:
         # Replace backend exec_command with one that raises
         backend = registry.get("local")
 
-        async def _boom(cmd, timeout=None, workdir=None):
+        async def _boom(cmd, timeout=None, workdir=None, env_vars=None):
             raise RuntimeError("connection lost")
 
         backend.exec_command = _boom  # type: ignore[attr-defined]
@@ -461,7 +483,7 @@ class TestEnvGrepToolDispatch:
         )
         assert result.success is True
         assert result.output == "src/main.py:10:match\n"
-        assert fake_backend.calls == [("grep", "TODO", "src/", "*.py")]
+        assert fake_backend.calls == [("grep", "TODO", "src/", "*.py", False, None)]
 
     def test_default_instance_is_local(
         self, registry: EnvironmentRegistry, fake_backend: FakeBackend
@@ -577,7 +599,7 @@ class TestEnvListDirToolDispatch:
         assert len(entries) == 2
         assert entries[0]["name"] == "foo.py"
         assert entries[1]["entry_type"] == "dir"
-        assert fake_backend.calls == [("list_dir", "/tmp")]
+        assert fake_backend.calls == [("list_dir", "/tmp", 1)]
 
     def test_default_instance_is_local(
         self, registry: EnvironmentRegistry, fake_backend: FakeBackend
@@ -596,7 +618,7 @@ class TestEnvListDirToolDispatch:
 
         tool = EnvListDirTool(registry)
         asyncio.run(tool.execute({}))
-        assert fake_backend.calls == [("list_dir", ".")]
+        assert fake_backend.calls == [("list_dir", ".", 1)]
 
     def test_missing_instance_returns_error(
         self, registry: EnvironmentRegistry
@@ -761,3 +783,111 @@ class TestAllToolsHaveInstanceParam:
             assert "instance" not in required, (
                 f"{cls.__name__} should not require 'instance'"
             )
+
+
+# ---------------------------------------------------------------------------
+# NLSpec param passthrough tests
+# ---------------------------------------------------------------------------
+
+
+class TestEnvExecToolNLSpec:
+    """Tests for NLSpec additions: env_vars passthrough and timing output."""
+
+    def test_exec_schema_has_env_vars(self, registry: EnvironmentRegistry) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvExecTool
+
+        tool = EnvExecTool(registry)
+        props = tool.input_schema["properties"]
+        assert "env_vars" in props
+        assert props["env_vars"]["type"] == "object"
+
+    def test_exec_passes_env_vars_to_backend(
+        self, registry: EnvironmentRegistry, fake_backend: FakeBackend
+    ) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvExecTool
+
+        tool = EnvExecTool(registry)
+        result = asyncio.run(
+            tool.execute(
+                {"command": "echo $FOO", "env_vars": {"FOO": "bar", "BAZ": "qux"}}
+            )
+        )
+        assert result.success is True
+        assert fake_backend.calls == [
+            ("exec_command", "echo $FOO", None, None, {"FOO": "bar", "BAZ": "qux"})
+        ]
+
+    def test_exec_output_includes_timing(
+        self, registry: EnvironmentRegistry, fake_backend: FakeBackend
+    ) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvExecTool
+
+        tool = EnvExecTool(registry)
+        result = asyncio.run(tool.execute({"command": "echo hi"}))
+        assert result.success is True
+        assert result.output["timed_out"] is False
+        assert result.output["duration_ms"] == 42
+
+
+class TestEnvListDirToolNLSpec:
+    """Tests for NLSpec additions: depth passthrough."""
+
+    def test_list_dir_schema_has_depth(self, registry: EnvironmentRegistry) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvListDirTool
+
+        tool = EnvListDirTool(registry)
+        props = tool.input_schema["properties"]
+        assert "depth" in props
+        assert props["depth"]["type"] == "integer"
+
+    def test_list_dir_passes_depth_to_backend(
+        self, registry: EnvironmentRegistry, fake_backend: FakeBackend
+    ) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvListDirTool
+
+        tool = EnvListDirTool(registry)
+        result = asyncio.run(tool.execute({"path": "/tmp", "depth": 3}))
+        assert result.success is True
+        assert fake_backend.calls == [("list_dir", "/tmp", 3)]
+
+
+class TestEnvGrepToolNLSpec:
+    """Tests for NLSpec additions: case_insensitive and max_results passthrough."""
+
+    def test_grep_schema_has_case_insensitive(
+        self, registry: EnvironmentRegistry
+    ) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvGrepTool
+
+        tool = EnvGrepTool(registry)
+        props = tool.input_schema["properties"]
+        assert "case_insensitive" in props
+        assert props["case_insensitive"]["type"] == "boolean"
+
+    def test_grep_schema_has_max_results(self, registry: EnvironmentRegistry) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvGrepTool
+
+        tool = EnvGrepTool(registry)
+        props = tool.input_schema["properties"]
+        assert "max_results" in props
+        assert props["max_results"]["type"] == "integer"
+
+    def test_grep_passes_params_to_backend(
+        self, registry: EnvironmentRegistry, fake_backend: FakeBackend
+    ) -> None:
+        from amplifier_module_tools_env_all.dispatch import EnvGrepTool
+
+        tool = EnvGrepTool(registry)
+        result = asyncio.run(
+            tool.execute(
+                {
+                    "pattern": "TODO",
+                    "path": "src/",
+                    "glob": "*.py",
+                    "case_insensitive": True,
+                    "max_results": 50,
+                }
+            )
+        )
+        assert result.success is True
+        assert fake_backend.calls == [("grep", "TODO", "src/", "*.py", True, 50)]
