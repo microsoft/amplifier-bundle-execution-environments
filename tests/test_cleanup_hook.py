@@ -201,6 +201,7 @@ class TestMountRegistersHook:
 
         coordinator = MagicMock()
         coordinator.hooks = MagicMock()
+        coordinator.get_capability = MagicMock(return_value=None)
 
         asyncio.run(mount(coordinator, {}))
 
@@ -215,6 +216,7 @@ class TestMountRegistersHook:
 
         coordinator = MagicMock()
         coordinator.hooks = MagicMock()
+        coordinator.get_capability = MagicMock(return_value=None)
 
         asyncio.run(mount(coordinator, {}))
 

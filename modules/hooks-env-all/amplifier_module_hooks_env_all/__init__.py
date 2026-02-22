@@ -67,16 +67,17 @@ async def mount(
     """
     config = config or {}
 
-    # Create the shared registry
-    registry = EnvironmentRegistry()
-
-    # Auto-create the "local" instance
-    working_dir = config.get("working_dir", os.getcwd())
-    local_backend = LocalBackend(working_dir=working_dir)
-    registry.register("local", local_backend, "local")
-
-    # Store registry as a capability for the tools module
-    coordinator.register_capability("env_registry", registry)
+    # Get-or-create shared registry (handles mount ordering — tools may mount first)
+    registry = coordinator.get_capability("env_registry")
+    if registry is None:
+        registry = EnvironmentRegistry()
+        working_dir = config.get("working_dir", os.getcwd())
+        local_backend = LocalBackend(working_dir=working_dir)
+        registry.register("local", local_backend, "local")
+        coordinator.register_capability("env_registry", registry)
+        logger.info("hooks-env-all: created shared registry with 'local' instance")
+    else:
+        logger.info("hooks-env-all: using existing registry from tools module")
 
     # Register cleanup handler
     handler = EnvCleanupHandler(registry)

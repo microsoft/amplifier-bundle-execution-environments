@@ -41,21 +41,19 @@ async def mount(
 
     config = config or {}
 
-    # Get registry from coordinator capability (set by hooks-env-all)
+    # Get-or-create shared registry (handles mount ordering — hooks may mount after tools)
     registry = coordinator.get_capability("env_registry")
     if registry is None:
-        # If hooks haven't run yet, create a temporary registry
-        # This handles mount ordering issues
         import os
 
         from amplifier_env_common.backends.local import LocalBackend
 
-        logger.warning(
-            "tools-env-all: registry not found in capabilities, creating standalone"
-        )
         registry = EnvironmentRegistry()
         registry.register("local", LocalBackend(working_dir=os.getcwd()), "local")
         coordinator.register_capability("env_registry", registry)
+        logger.info("tools-env-all: created shared registry with 'local' instance")
+    else:
+        logger.info("tools-env-all: using existing registry from hooks module")
 
     # Create all 11 tools
     all_tools = [
