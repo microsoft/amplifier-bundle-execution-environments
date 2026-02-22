@@ -5,14 +5,14 @@ bundle:
 
 tools:
   - module: tools-env-all
-    source: env-all:modules/tools-env-all
+    source: git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=modules/tools-env-all
     config: {}
 
 hooks:
   - module: hooks-env-all
-    source: env-all:modules/hooks-env-all
+    source: git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=modules/hooks-env-all
     config: {}
 
 context:
   include:
-    - env-all:context/env-all-guide.md
+    - git+https://github.com/bkrabach/amplifier-bundle-env-all@main#path=context/env-all-guide.md
