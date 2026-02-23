@@ -91,6 +91,16 @@ class EnvCreateTool:
                     "type": "integer",
                     "description": "Docker: seconds to wait for health check (default: 60)",
                 },
+                "env_policy": {
+                    "type": "string",
+                    "enum": ["inherit_all", "core_only", "inherit_none"],
+                    "description": "Environment variable inheritance policy (default: core_only). Controls which host vars are visible to commands.",
+                },
+                "wrappers": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["logging", "readonly"]},
+                    "description": "Composable wrappers to apply (e.g., ['logging', 'readonly'])",
+                },
             },
             "required": ["type", "name"],
         }
@@ -133,11 +143,31 @@ class EnvCreateTool:
                     },
                 )
 
+            # C.2 + D.2: Apply composable wrappers
+            # Order matters: ReadOnly innermost, Logging outermost
+            wrappers = input.get("wrappers", [])
+            if "readonly" in wrappers:
+                from amplifier_env_common.wrappers.readonly_wrapper import (
+                    ReadOnlyWrapper,
+                )
+
+                backend = ReadOnlyWrapper(inner=backend)
+            if "logging" in wrappers:
+                from amplifier_env_common.wrappers.logging_wrapper import (
+                    LoggingWrapper,
+                )
+
+                backend = LoggingWrapper(inner=backend)
+
             # B.4: Determine ownership — attached resources are not owned
             is_attached = bool(input.get("attach_to"))
             owned = not is_attached
 
-            metadata = {"persistent": input.get("persistent", False)}
+            env_policy = input.get("env_policy", "core_only")
+            metadata = {
+                "persistent": input.get("persistent", False),
+                "env_policy": env_policy,
+            }
             self._registry.register(
                 env_name, backend, env_type, metadata=metadata, owned=owned
             )
@@ -167,7 +197,8 @@ class EnvCreateTool:
 
     async def _create_local(self, input: dict) -> LocalBackend:
         working_dir = input.get("working_dir", os.getcwd())
-        return LocalBackend(working_dir=working_dir)
+        env_policy = input.get("env_policy", "core_only")
+        return LocalBackend(working_dir=working_dir, env_policy=env_policy)
 
     async def _create_docker(self, input: dict) -> Any:
         from amplifier_env_common.backends.docker import DockerBackend

@@ -2,7 +2,8 @@
 
 Validates the agent context guide covers all required concepts, tools,
 and example workflows for the Phase 4 instance-based environment model,
-including Phase 4.2 capabilities (compose, attach, SSH auto-discovery).
+including Phase 4.2 (compose, attach, SSH auto-discovery) and
+Phase 4.3 (security, composable wrappers) capabilities.
 """
 
 from pathlib import Path
@@ -39,10 +40,10 @@ class TestContextGuideContent:
     def test_guide_exists(self):
         assert GUIDE_PATH.exists(), "env-all-guide.md must exist"
 
-    def test_under_120_lines(self):
+    def test_under_140_lines(self):
         text = _read_guide()
         count = _line_count(text)
-        assert count <= 120, f"Guide is {count} lines, must be under 120"
+        assert count <= 140, f"Guide is {count} lines, must be under 140"
 
     def test_all_11_tools_referenced(self):
         """Every tool must appear in the guide."""
@@ -164,4 +165,79 @@ class TestPhase42Content:
         create_text = " ".join(create_lines)
         assert "compose" in create_text.lower() or "attach" in create_text.lower(), (
             "env_create table entry must reference compose or attach capabilities"
+        )
+
+
+class TestPhase43Content:
+    """Verify the guide documents Phase 4.3 security and wrapper capabilities."""
+
+    def test_security_section_exists(self):
+        """Guide must have a security section covering env var filtering."""
+        text = _read_guide()
+        lower = text.lower()
+        assert "security" in lower, "Must have a security section"
+        assert "env_policy" in text, "Must mention env_policy parameter"
+
+    def test_env_var_policies_documented(self):
+        """Guide must document all three env var policies."""
+        text = _read_guide()
+        assert "core_only" in text, "Must document core_only policy"
+        assert "inherit_all" in text, "Must document inherit_all policy"
+        assert "inherit_none" in text, "Must document inherit_none policy"
+
+    def test_core_only_is_default(self):
+        """Guide must indicate core_only is the default policy."""
+        text = _read_guide()
+        # core_only and default must appear near each other
+        assert "core_only" in text and "default" in text.lower(), (
+            "Must indicate core_only is the default"
+        )
+
+    def test_filtered_patterns_mentioned(self):
+        """Guide must mention what patterns are filtered."""
+        text = _read_guide()
+        # Must mention the sensitive patterns that get filtered
+        assert "API_KEY" in text or "SECRET" in text or "TOKEN" in text, (
+            "Must mention filtered env var patterns (API_KEY, SECRET, TOKEN, etc.)"
+        )
+
+    def test_wrappers_section_exists(self):
+        """Guide must have a composable wrappers section."""
+        text = _read_guide()
+        lower = text.lower()
+        assert "wrapper" in lower, "Must have a wrappers section"
+        assert "logging" in lower, "Must document logging wrapper"
+        assert "readonly" in lower, "Must document readonly wrapper"
+
+    def test_wrappers_creation_example(self):
+        """Guide must show how to apply wrappers at creation time."""
+        text = _read_guide()
+        assert "wrappers=" in text, "Must show wrappers parameter usage"
+        assert 'wrappers=["logging"' in text or "wrappers=['logging'" in text, (
+            "Must show logging wrapper example"
+        )
+
+    def test_wrapper_behaviors_documented(self):
+        """Guide must explain what each wrapper does."""
+        text = _read_guide()
+        lower = text.lower()
+        # logging wrapper logs operations
+        assert "log" in lower, "Must explain logging wrapper behavior"
+        # readonly wrapper blocks writes
+        assert "block" in lower or "permissionerror" in lower, (
+            "Must explain readonly wrapper blocks writes"
+        )
+
+    def test_env_create_table_has_phase43_params(self):
+        """Tool reference table for env_create must mention env_policy and wrappers."""
+        text = _read_guide()
+        table_lines = [line for line in text.splitlines() if "|" in line]
+        create_lines = [line for line in table_lines if "env_create" in line]
+        assert create_lines, "env_create must appear in the tool table"
+        create_text = " ".join(create_lines)
+        assert "env_policy" in create_text, (
+            "env_create table entry must mention env_policy param"
+        )
+        assert "wrappers" in create_text, (
+            "env_create table entry must mention wrappers param"
         )

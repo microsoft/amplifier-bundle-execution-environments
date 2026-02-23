@@ -916,3 +916,270 @@ class TestEnvCreateSSHDiscovery:
             )
 
         mock_discover.assert_called_once_with("myhost.local")
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.3 A.4: Integration tests — factory + LocalBackend env_policy wiring
+# ---------------------------------------------------------------------------
+
+
+class TestEnvCreateEnvPolicyIntegration:
+    """Factory creates backends that respect env_policy end-to-end."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.containers_tool = MockContainersTool()
+        self.coordinator.register_tool("containers", self.containers_tool)
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_local_create_with_env_policy(self) -> None:
+        """Create local instance with env_policy, verify it's stored in metadata."""
+        result = asyncio.run(
+            self.tool.execute(
+                {"type": "local", "name": "locked", "env_policy": "inherit_none"}
+            )
+        )
+        assert result.success is True
+        instances = self.registry.list_instances()
+        inst = [i for i in instances if i["name"] == "locked"][0]
+        assert inst["metadata"]["env_policy"] == "inherit_none"
+
+    def test_local_backend_receives_env_policy(self) -> None:
+        """LocalBackend created by factory has the correct env_policy."""
+        asyncio.run(
+            self.tool.execute(
+                {"type": "local", "name": "filtered", "env_policy": "inherit_all"}
+            )
+        )
+        backend = self.registry.get("filtered")
+        assert isinstance(backend, LocalBackend)
+        assert backend._env_policy == "inherit_all"
+
+    def test_local_default_env_policy_is_core_only(self) -> None:
+        """When env_policy not specified, LocalBackend defaults to core_only."""
+        asyncio.run(self.tool.execute({"type": "local", "name": "default"}))
+        backend = self.registry.get("default")
+        assert isinstance(backend, LocalBackend)
+        assert backend._env_policy == "core_only"
+
+    def test_docker_create_ignores_env_policy(self) -> None:
+        """Docker instances accept env_policy without error (stored in metadata only)."""
+        result = asyncio.run(
+            self.tool.execute(
+                {"type": "docker", "name": "build", "env_policy": "inherit_none"}
+            )
+        )
+        assert result.success is True
+        backend = self.registry.get("build")
+        assert isinstance(backend, DockerBackend)
+        # env_policy is in metadata, not on the DockerBackend itself
+        instances = self.registry.list_instances()
+        inst = [i for i in instances if i["name"] == "build"][0]
+        assert inst["metadata"]["env_policy"] == "inherit_none"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.3 A.2: env_policy in schema and metadata
+# ---------------------------------------------------------------------------
+
+
+class TestEnvCreateEnvPolicySchema:
+    """env_policy parameter appears in input_schema with correct enum."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_schema_has_env_policy(self) -> None:
+        """env_policy appears in input_schema properties with correct enum values."""
+        props = self.tool.input_schema["properties"]
+        assert "env_policy" in props
+        assert props["env_policy"]["type"] == "string"
+        assert set(props["env_policy"]["enum"]) == {
+            "inherit_all",
+            "core_only",
+            "inherit_none",
+        }
+
+    def test_env_policy_not_required(self) -> None:
+        """env_policy is optional (defaults to core_only)."""
+        required = self.tool.input_schema.get("required", [])
+        assert "env_policy" not in required
+
+
+class TestEnvCreateEnvPolicyMetadata:
+    """env_policy is stored in registry metadata after create."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_env_policy_stored_in_metadata_default(self) -> None:
+        """Default env_policy (core_only) stored in metadata when not specified."""
+        asyncio.run(self.tool.execute({"type": "local", "name": "test-default"}))
+        instances = self.registry.list_instances()
+        inst = [i for i in instances if i["name"] == "test-default"][0]
+        assert inst["metadata"]["env_policy"] == "core_only"
+
+    def test_env_policy_stored_in_metadata_explicit(self) -> None:
+        """Explicit env_policy stored in metadata."""
+        asyncio.run(
+            self.tool.execute(
+                {"type": "local", "name": "test-explicit", "env_policy": "inherit_all"}
+            )
+        )
+        instances = self.registry.list_instances()
+        inst = [i for i in instances if i["name"] == "test-explicit"][0]
+        assert inst["metadata"]["env_policy"] == "inherit_all"
+
+
+# ---------------------------------------------------------------------------
+# C.2: Wrappers schema and wiring
+# ---------------------------------------------------------------------------
+
+
+class TestEnvCreateWrappersSchema:
+    """wrappers parameter appears in input_schema."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_schema_has_wrappers(self) -> None:
+        """wrappers appears in input_schema properties with correct type."""
+        props = self.tool.input_schema["properties"]
+        assert "wrappers" in props
+        assert props["wrappers"]["type"] == "array"
+        assert props["wrappers"]["items"]["type"] == "string"
+        assert "logging" in props["wrappers"]["items"]["enum"]
+
+    def test_wrappers_not_required(self) -> None:
+        """wrappers is optional."""
+        required = self.tool.input_schema.get("required", [])
+        assert "wrappers" not in required
+
+
+class TestEnvCreateLoggingWrapper:
+    """env_create with wrappers=['logging'] wraps the backend."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_create_with_logging_wrapper(self) -> None:
+        """Creating with wrappers=['logging'] registers a LoggingWrapper."""
+        from amplifier_env_common.wrappers.logging_wrapper import LoggingWrapper
+
+        result = asyncio.run(
+            self.tool.execute(
+                {"type": "local", "name": "test-logged", "wrappers": ["logging"]}
+            )
+        )
+        assert result.success
+        backend = self.registry.get("test-logged")
+        assert backend is not None
+        assert isinstance(backend, LoggingWrapper)
+
+    def test_create_without_wrappers_no_wrapping(self) -> None:
+        """Creating without wrappers keeps the raw backend."""
+        from amplifier_env_common.wrappers.logging_wrapper import LoggingWrapper
+
+        result = asyncio.run(self.tool.execute({"type": "local", "name": "test-raw"}))
+        assert result.success
+        backend = self.registry.get("test-raw")
+        assert backend is not None
+        assert not isinstance(backend, LoggingWrapper)
+
+
+# ---------------------------------------------------------------------------
+# D.2: ReadOnly wrapper wiring and composition order
+# ---------------------------------------------------------------------------
+
+
+class TestEnvCreateReadOnlyWrapper:
+    """env_create with wrappers=['readonly'] wraps the backend."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_create_with_readonly_wrapper(self) -> None:
+        """Creating with wrappers=['readonly'] registers a ReadOnlyWrapper."""
+        from amplifier_env_common.wrappers.readonly_wrapper import ReadOnlyWrapper
+
+        result = asyncio.run(
+            self.tool.execute(
+                {"type": "local", "name": "test-ro", "wrappers": ["readonly"]}
+            )
+        )
+        assert result.success
+        backend = self.registry.get("test-ro")
+        assert backend is not None
+        assert isinstance(backend, ReadOnlyWrapper)
+
+    def test_create_with_both_wrappers(self) -> None:
+        """Creating with wrappers=['logging', 'readonly'] applies both in correct order.
+
+        Composition: Logging(ReadOnly(LocalBackend))
+        - ReadOnly is innermost (wraps first)
+        - Logging is outermost (wraps second)
+        """
+        from amplifier_env_common.wrappers.logging_wrapper import LoggingWrapper
+        from amplifier_env_common.wrappers.readonly_wrapper import ReadOnlyWrapper
+
+        result = asyncio.run(
+            self.tool.execute(
+                {
+                    "type": "local",
+                    "name": "test-both",
+                    "wrappers": ["logging", "readonly"],
+                }
+            )
+        )
+        assert result.success
+        backend = self.registry.get("test-both")
+        assert backend is not None
+        # Outermost is LoggingWrapper
+        assert isinstance(backend, LoggingWrapper)
+        # Inner is ReadOnlyWrapper
+        assert isinstance(backend._inner, ReadOnlyWrapper)
+        # Innermost is LocalBackend
+        assert isinstance(backend._inner._inner, LocalBackend)
+
+    def test_composition_order_logging_captures_readonly_error(self) -> None:
+        """When both wrappers applied, write_file is logged then rejected.
+
+        Logging(ReadOnly(backend)): Logging logs the attempt, ReadOnly raises.
+        """
+        from amplifier_env_common.wrappers.logging_wrapper import LoggingWrapper
+        from amplifier_env_common.wrappers.readonly_wrapper import ReadOnlyWrapper
+
+        result = asyncio.run(
+            self.tool.execute(
+                {
+                    "type": "local",
+                    "name": "test-composed",
+                    "wrappers": ["logging", "readonly"],
+                }
+            )
+        )
+        assert result.success
+        backend = self.registry.get("test-composed")
+        assert backend is not None
+
+        # Verify composition order
+        assert isinstance(backend, LoggingWrapper)
+        assert isinstance(backend._inner, ReadOnlyWrapper)
+
+        # A write_file call should raise PermissionError from ReadOnly
+        # but the LoggingWrapper logs the attempt before delegating
+        import pytest
+
+        with pytest.raises(PermissionError, match="read-only"):
+            asyncio.run(backend.write_file("/tmp/blocked.txt", "nope"))
