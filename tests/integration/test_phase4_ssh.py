@@ -5,6 +5,10 @@ running in Docker. They verify that the Phase 4 instance model works
 end-to-end with the SSH backend: exec commands, read/write files, and
 clean up via the EnvironmentRegistry.
 
+Phase 4.2 adds SSH credential auto-discovery tests that verify
+discover_ssh_config() works end-to-end against the real system and
+a real sshd container.
+
 Requirements:
     - Running Docker daemon accessible via ``docker`` CLI
     - Run with: ``pytest env-all/tests/integration/ -v --ssh-integration``
@@ -12,8 +16,10 @@ Requirements:
 
 from __future__ import annotations
 
+import os
 import uuid
 
+import asyncssh
 import pytest
 import pytest_asyncio
 
@@ -176,3 +182,90 @@ class TestPhase4SSHLifecycle:
             # Safety net: disconnect on failure
             await conn.disconnect()
             raise
+
+
+@pytest.mark.ssh_integration
+class TestPhase4SSHDiscovery:
+    """Integration tests for SSH credential auto-discovery (Phase 4.2)."""
+
+    def test_discover_ssh_config_finds_current_user(self):
+        """Verify discovery chain finds the current user when no ssh config match."""
+        from amplifier_module_tools_env_all.ssh_discovery import discover_ssh_config
+
+        # Use a hostname that won't match any ssh config entry
+        result = discover_ssh_config("nonexistent-host-12345")
+
+        # Should still discover the current user
+        assert "username" in result
+        assert len(result["username"]) > 0
+
+    def test_discover_finds_default_key(self):
+        """Verify discovery chain finds a default SSH key if one exists."""
+        from amplifier_module_tools_env_all.ssh_discovery import discover_ssh_config
+
+        result = discover_ssh_config("any-host")
+
+        # If any default keys exist, should discover one
+        default_keys = [
+            os.path.expanduser("~/.ssh/id_ed25519"),
+            os.path.expanduser("~/.ssh/id_rsa"),
+            os.path.expanduser("~/.ssh/id_ecdsa"),
+        ]
+        has_key = any(os.path.exists(k) for k in default_keys)
+        if has_key:
+            assert "key_file" in result
+            assert os.path.exists(result["key_file"])
+
+    @pytest.mark.asyncio
+    async def test_ssh_connect_with_discovery(self, sshd_container):
+        """Verify SSH connection works with auto-discovered credentials against real sshd."""
+        from amplifier_module_tools_env_all.ssh_discovery import discover_ssh_config
+
+        # The sshd_container fixture provides a real sshd with known credentials.
+        # We can't test full auto-discovery against it (it uses ephemeral keys),
+        # but we CAN test that the discovery chain runs without errors
+        # and that explicitly provided credentials work alongside discovery.
+
+        host = sshd_container["host"]
+        port = sshd_container["port"]
+        username = sshd_container["username"]
+        key_file = sshd_container["key_file"]
+        known_hosts = sshd_container["known_hosts"]
+
+        # Run discovery (will find current user but not matching ssh config for localhost)
+        discovered = discover_ssh_config(host)
+        assert isinstance(discovered, dict)
+
+        # Connect using explicit credentials (simulating explicit params overriding discovery)
+        conn = await asyncssh.connect(
+            host,
+            port=port,
+            username=username,
+            client_keys=[key_file],
+            known_hosts=known_hosts,
+        )
+
+        try:
+            # Create SSHBackendWrapper with the connection
+            async def exec_fn(cmd, timeout=None, workdir=None):
+                from amplifier_env_common.models import EnvExecResult
+
+                full_cmd = f"cd {workdir} && {cmd}" if workdir else cmd
+                result = await conn.run(full_cmd)
+                return EnvExecResult(
+                    stdout=str(result.stdout) if result.stdout else "",
+                    stderr=str(result.stderr) if result.stderr else "",
+                    exit_code=result.exit_status or 0,
+                )
+
+            backend = SSHBackendWrapper(
+                exec_fn=exec_fn,
+                host=host,
+                disconnect_fn=conn.close,
+            )
+
+            # Verify it works
+            result = await backend.exec_command("echo discovery_test")
+            assert "discovery_test" in result.stdout
+        finally:
+            conn.close()

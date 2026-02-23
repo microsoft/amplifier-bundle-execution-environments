@@ -28,19 +28,30 @@ class EnvCleanupHandler:
         self._registry = registry
 
     async def handle_session_end(self, event: str, data: dict[str, Any]) -> HookResult:
-        """Destroy all non-persistent instances."""
+        """Destroy all owned instances; skip unowned (attached) ones."""
         session_id = data.get("session_id", "unknown")
         instances = self._registry.list_instances()
 
-        if not instances:
+        owned = [i for i in instances if i.get("owned", True)]
+        unowned = [i for i in instances if not i.get("owned", True)]
+
+        if unowned:
             logger.info(
-                "env-cleanup: no instances to clean up for session %s", session_id
+                "env-cleanup: skipping %d unowned instances: %s",
+                len(unowned),
+                [i["name"] for i in unowned],
+            )
+
+        if not owned:
+            logger.info(
+                "env-cleanup: no owned instances to clean up for session %s",
+                session_id,
             )
             return HookResult(action="continue")
 
         logger.info(
-            "env-cleanup: destroying %d instances for session %s",
-            len(instances),
+            "env-cleanup: destroying %d owned instances for session %s",
+            len(owned),
             session_id,
         )
 

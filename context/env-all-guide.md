@@ -10,7 +10,7 @@ Every tool takes an `instance` parameter that targets a named environment. A **"
 
 | Tool | Purpose | Key Params |
 |------|---------|------------|
-| `env_create` | Create a new environment instance | type (local/docker/ssh), name, + type-specific |
+| `env_create` | Create or attach to an environment | type, name, + compose_files, attach_to, health_check |
 | `env_destroy` | Tear down an instance | instance |
 | `env_list` | List all active instances | (none) |
 | `env_exec` | Execute shell command | instance, command, timeout, workdir, env_vars |
@@ -52,7 +52,7 @@ env_destroy(instance="build")
 
 **Remote SSH:**
 ```
-env_create(type="ssh", name="pi", host="voicebox", username="bkrabach")
+env_create(type="ssh", name="pi", host="voicebox")
 env_exec(instance="pi", command="uname -a")
 env_read_file(instance="pi", path="/etc/hostname")
 env_destroy(instance="pi")
@@ -73,6 +73,37 @@ env_destroy(instance="build")
 - **Recursive listing:** `env_list_dir(instance="build", path="src", depth=3)` (default depth=1)
 - **Case-insensitive grep:** `env_grep(instance="local", pattern="TODO", case_insensitive=true, max_results=10)`
 - **Execution timing:** `env_exec` results include `timed_out` (boolean) and `duration_ms` (wall-clock milliseconds)
+
+## Compose Support
+
+Bring up multi-service stacks and attach to a specific service:
+```
+env_create(type="docker", name="stack",
+    compose_files=["docker-compose.yml"],
+    compose_project="my-project",
+    attach_to="web",
+    health_check=true)
+env_exec(instance="stack", command="python manage.py migrate")
+env_destroy(instance="stack")  # runs compose down
+```
+
+## Cross-Session Sharing
+
+Attach to an existing container created by another session:
+```
+env_create(type="docker", name="workspace", attach_to="container-id-from-parent")
+```
+Attached instances are not destroyed on session cleanup — the creating session owns them.
+The `env_create` return value includes connection details (container_id, host, etc.).
+
+## SSH Auto-Discovery
+
+SSH credentials are auto-discovered when not explicitly provided:
+```
+env_create(type="ssh", name="pi", host="voicebox")
+# Auto-discovers username and key from ~/.ssh/config and default keys
+```
+Explicit params always override auto-discovered values.
 
 ## Errors
 

@@ -337,3 +337,328 @@ class TestPhase4DockerLifecycle:
                     await _docker_cli_invoke({"operation": "destroy", "container": n})
                 except Exception:
                     pass
+
+
+# ---------------------------------------------------------------------------
+# Compose helpers
+# ---------------------------------------------------------------------------
+
+
+def _compose_available() -> bool:
+    """Check whether docker compose (v2 plugin) is available."""
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            timeout=10,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _unique_project() -> str:
+    """Return a unique compose project name (must be lowercase, no dots)."""
+    return f"envtest{uuid.uuid4().hex[:10]}"
+
+
+_COMPOSE_TEMPLATE = """\
+services:
+  app:
+    image: alpine:3.20
+    command: sleep 3600
+"""
+
+
+async def _compose_up(compose_file: str, project: str) -> None:
+    """Bring up a compose stack."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "compose",
+        "-f",
+        compose_file,
+        "-p",
+        project,
+        "up",
+        "-d",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stdout, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        msg = f"compose up failed: {stderr.decode().strip()}"
+        raise RuntimeError(msg)
+
+
+async def _compose_down(compose_file: str, project: str) -> None:
+    """Tear down a compose stack (best-effort)."""
+    proc = await asyncio.create_subprocess_exec(
+        "docker",
+        "compose",
+        "-f",
+        compose_file,
+        "-p",
+        project,
+        "down",
+        "--remove-orphans",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    await proc.communicate()
+
+
+async def _wait_container_running(name: str, timeout_sec: int = 30) -> None:
+    """Poll until a container is running (or raise)."""
+    deadline = asyncio.get_event_loop().time() + timeout_sec
+    while asyncio.get_event_loop().time() < deadline:
+        proc = await asyncio.create_subprocess_exec(
+            "docker",
+            "inspect",
+            "--format",
+            "{{.State.Running}}",
+            name,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, _ = await proc.communicate()
+        if stdout.decode().strip() == "true":
+            return
+        await asyncio.sleep(1)
+    msg = f"Container {name} did not start within {timeout_sec}s"
+    raise TimeoutError(msg)
+
+
+def _make_compose_invoke(compose_file: str):
+    """Create a containers-invoke shim that handles compose-aware destroy.
+
+    For exec/status operations, delegates to the standard _docker_cli_invoke.
+    For destroy with compose_project, runs ``docker compose down``.
+    """
+
+    async def invoke(input_dict: dict) -> ToolResult:
+        operation = input_dict.get("operation")
+
+        if operation == "destroy" and input_dict.get("compose_project"):
+            project = input_dict["compose_project"]
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "compose",
+                "-f",
+                compose_file,
+                "-p",
+                project,
+                "down",
+                "--remove-orphans",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            _, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                return ToolResult(
+                    success=False,
+                    error={
+                        "message": f"compose down failed: {stderr.decode().strip()}"
+                    },
+                )
+            return ToolResult(success=True, output="compose stack destroyed")
+
+        return await _docker_cli_invoke(input_dict)
+
+    return invoke
+
+
+# ---------------------------------------------------------------------------
+# Compose lifecycle tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.docker_integration
+class TestPhase4ComposeLifecycle:
+    """Integration tests for compose support in DockerBackend."""
+
+    @pytest.mark.asyncio
+    async def test_compose_lifecycle(self, tmp_path):
+        """Full lifecycle: compose up → exec in service → compose down."""
+        if not _compose_available():
+            pytest.skip("docker compose (v2) not available")
+
+        compose_file = tmp_path / "docker-compose.yml"
+        compose_file.write_text(_COMPOSE_TEMPLATE)
+
+        project = _unique_project()
+        container_name = f"{project}-app-1"
+
+        try:
+            # Bring up the compose stack
+            await _compose_up(str(compose_file), project)
+
+            # Wait for the app container to be running
+            await _wait_container_running(container_name)
+
+            # Create a DockerBackend attached to the compose service
+            backend = DockerBackend(
+                containers_invoke=_docker_cli_invoke,
+                container_id=container_name,
+                compose_project=project,
+            )
+
+            # exec works inside the compose container
+            result = await backend.exec_command("echo hello from compose")
+            assert result.exit_code == 0
+            assert "hello from compose" in result.stdout
+
+            # info() includes compose_project
+            info = backend.info()
+            assert info["compose_project"] == project
+            assert info["container_id"] == container_name
+
+        finally:
+            await _compose_down(str(compose_file), project)
+
+    @pytest.mark.asyncio
+    async def test_compose_cleanup_destroys_stack(self, tmp_path):
+        """Verify DockerBackend.cleanup() with compose_project tears down the stack."""
+        if not _compose_available():
+            pytest.skip("docker compose (v2) not available")
+
+        compose_file = tmp_path / "docker-compose.yml"
+        compose_file.write_text(_COMPOSE_TEMPLATE)
+
+        project = _unique_project()
+        container_name = f"{project}-app-1"
+
+        try:
+            # Bring up the compose stack
+            await _compose_up(str(compose_file), project)
+            await _wait_container_running(container_name)
+
+            # Verify container exists before cleanup
+            assert await _container_exists(container_name) is True
+
+            # Create a DockerBackend with compose-aware invoke
+            invoke = _make_compose_invoke(str(compose_file))
+            backend = DockerBackend(
+                containers_invoke=invoke,
+                container_id=container_name,
+                compose_project=project,
+            )
+
+            # cleanup() should route through compose down
+            await backend.cleanup()
+
+            # Container should be gone
+            assert await _container_exists(container_name) is False
+
+        finally:
+            # Safety net in case cleanup didn't work
+            await _compose_down(str(compose_file), project)
+
+
+# ---------------------------------------------------------------------------
+# Attach lifecycle tests (Phase 4.2 cross-session sharing)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.docker_integration
+class TestPhase4AttachLifecycle:
+    """Integration tests for parent-creates / child-attaches cross-session sharing."""
+
+    @pytest.mark.asyncio
+    async def test_parent_child_attach_pattern(self):
+        """Parent (owned) and child (unowned) share a container.
+
+        Flow:
+        1. Create container externally
+        2. Parent registry: register with owned=True
+        3. Child registry: register same container with owned=False
+        4. Child exec works
+        5. Child destroy_all() does NOT destroy container (unowned)
+        6. Container still exists
+        7. Parent exec still works
+        8. Parent destroy_all() DOES destroy container (owned)
+        9. Container is gone
+        """
+        name = _unique_name()
+        parent_registry = EnvironmentRegistry()
+        child_registry = EnvironmentRegistry()
+
+        try:
+            # --- Step 1: Create container externally ---
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                name,
+                "alpine:3.20",
+                "sleep",
+                "3600",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            assert proc.returncode == 0, (
+                f"Container creation failed: {stderr.decode().strip()}"
+            )
+
+            # --- Step 2: Parent registers with owned=True ---
+            parent_backend = DockerBackend(
+                containers_invoke=_docker_cli_invoke,
+                container_id=name,
+            )
+            parent_registry.register(name, parent_backend, "docker", owned=True)
+
+            # --- Step 3: Child registers same container with owned=False ---
+            child_backend = DockerBackend(
+                containers_invoke=_docker_cli_invoke,
+                container_id=name,
+            )
+            child_registry.register(name, child_backend, "docker", owned=False)
+
+            # Verify both registrations reflect owned flag
+            parent_instances = parent_registry.list_instances()
+            assert len(parent_instances) == 1
+            assert parent_instances[0]["owned"] is True
+
+            child_instances = child_registry.list_instances()
+            assert len(child_instances) == 1
+            assert child_instances[0]["owned"] is False
+
+            # --- Step 4: Child exec works ---
+            child_result = await child_backend.exec_command("echo hello from child")
+            assert child_result.exit_code == 0
+            assert "hello from child" in child_result.stdout
+
+            # --- Step 5: Child destroy_all() does NOT destroy container ---
+            await child_registry.destroy_all()
+
+            # Child registry should still have the unowned instance
+            assert len(child_registry.list_instances()) == 1
+
+            # --- Step 6: Container still exists ---
+            assert await _container_exists(name) is True, (
+                "Container should survive child destroy_all (unowned)"
+            )
+
+            # --- Step 7: Parent exec still works ---
+            parent_result = await parent_backend.exec_command("echo still alive")
+            assert parent_result.exit_code == 0
+            assert "still alive" in parent_result.stdout
+
+            # --- Step 8: Parent destroy_all() DOES destroy container ---
+            await parent_registry.destroy_all()
+
+            # Parent registry should be empty
+            assert len(parent_registry.list_instances()) == 0
+
+            # --- Step 9: Container is gone ---
+            assert await _container_exists(name) is False, (
+                "Container should be destroyed by parent destroy_all (owned)"
+            )
+
+        finally:
+            # Safety net: force-remove container even if assertions fail
+            try:
+                await _docker_cli_invoke({"operation": "destroy", "container": name})
+            except Exception:
+                pass

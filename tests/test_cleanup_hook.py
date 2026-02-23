@@ -34,8 +34,21 @@ class StubBackend:
     def env_type(self) -> str:
         return self._env_type
 
+    def working_directory(self) -> str:
+        return "/stub"
+
+    def platform(self) -> str:
+        return "linux"
+
+    def os_version(self) -> str:
+        return "stub"
+
     async def exec_command(
-        self, cmd: str, timeout: float | None = None, workdir: str | None = None
+        self,
+        cmd: str,
+        timeout: float | None = None,
+        workdir: str | None = None,
+        env_vars: dict[str, str] | None = None,
     ) -> EnvExecResult:
         return EnvExecResult(stdout="", stderr="", exit_code=0)
 
@@ -53,11 +66,16 @@ class StubBackend:
     async def file_exists(self, path: str) -> bool:
         return False
 
-    async def list_dir(self, path: str) -> list[EnvFileEntry]:
+    async def list_dir(self, path: str, depth: int = 1) -> list[EnvFileEntry]:
         return []
 
     async def grep(
-        self, pattern: str, path: str | None = None, glob_filter: str | None = None
+        self,
+        pattern: str,
+        path: str | None = None,
+        glob_filter: str | None = None,
+        case_insensitive: bool = False,
+        max_results: int | None = None,
     ) -> str:
         return ""
 
@@ -237,3 +255,61 @@ class TestMountRegistersHook:
 
         assert result["name"] == "hooks-env-all"
         assert "version" in result
+
+
+# ---------------------------------------------------------------------------
+# B.5: Cleanup hook skips unowned instances
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupSkipsUnowned:
+    """Cleanup only destroys owned instances, leaves unowned intact."""
+
+    def test_cleanup_skips_unowned_instances(
+        self,
+        registry: EnvironmentRegistry,
+    ) -> None:
+        """Register owned + unowned; cleanup only destroys owned."""
+        from amplifier_module_hooks_env_all import EnvCleanupHandler
+
+        owned_backend = StubBackend("docker")
+        unowned_backend = StubBackend("docker")
+
+        registry.register("owned-inst", owned_backend, "docker", owned=True)
+        registry.register("unowned-inst", unowned_backend, "docker", owned=False)
+
+        handler = EnvCleanupHandler(registry)
+        asyncio.run(
+            handler.handle_session_end("session:end", {"session_id": "test-owned"})
+        )
+
+        # Owned backend was cleaned up
+        assert owned_backend.cleaned_up is True
+        # Unowned backend was NOT cleaned up
+        assert unowned_backend.cleaned_up is False
+        # Unowned instance still in registry
+        remaining = registry.list_instances()
+        assert len(remaining) == 1
+        assert remaining[0]["name"] == "unowned-inst"
+
+    def test_cleanup_logs_skipped_instances(
+        self,
+        registry: EnvironmentRegistry,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Verify logging mentions skipped unowned instances."""
+        import logging
+
+        from amplifier_module_hooks_env_all import EnvCleanupHandler
+
+        unowned_backend = StubBackend("docker")
+        registry.register("ext-db", unowned_backend, "docker", owned=False)
+
+        handler = EnvCleanupHandler(registry)
+        with caplog.at_level(logging.INFO):
+            asyncio.run(
+                handler.handle_session_end("session:end", {"session_id": "test-log"})
+            )
+
+        assert "skipping" in caplog.text.lower()
+        assert "ext-db" in caplog.text

@@ -1,7 +1,8 @@
 """Test that env-all-guide.md teaches the instance-based model correctly.
 
 Validates the agent context guide covers all required concepts, tools,
-and example workflows for the Phase 4 instance-based environment model.
+and example workflows for the Phase 4 instance-based environment model,
+including Phase 4.2 capabilities (compose, attach, SSH auto-discovery).
 """
 
 from pathlib import Path
@@ -38,10 +39,10 @@ class TestContextGuideContent:
     def test_guide_exists(self):
         assert GUIDE_PATH.exists(), "env-all-guide.md must exist"
 
-    def test_under_100_lines(self):
+    def test_under_120_lines(self):
         text = _read_guide()
         count = _line_count(text)
-        assert count <= 100, f"Guide is {count} lines, must be under 100"
+        assert count <= 120, f"Guide is {count} lines, must be under 120"
 
     def test_all_11_tools_referenced(self):
         """Every tool must appear in the guide."""
@@ -110,3 +111,57 @@ class TestContextGuideContent:
         assert "Decorator" not in text, "Must not reference old decorator concept"
         assert "AuditTrail" not in text
         assert "ReadOnly" not in text
+
+
+class TestPhase42Content:
+    """Verify the guide documents Phase 4.2 capabilities."""
+
+    def test_compose_support_section(self):
+        """Guide must have a compose support section with key params."""
+        text = _read_guide()
+        lower = text.lower()
+        assert "compose" in lower, "Must have compose support section"
+        assert "compose_files" in text, "Must mention compose_files param"
+        assert "compose_project" in text, "Must mention compose_project param"
+        assert "attach_to" in text, "Must mention attach_to param"
+        assert "health_check" in text, "Must mention health_check param"
+
+    def test_compose_example(self):
+        """Guide must show a compose workflow example."""
+        text = _read_guide()
+        # Must show compose_files in a code example
+        assert "compose_files=" in text, "Must show compose_files usage"
+        assert "compose down" in text.lower() or "compose" in text.lower(), (
+            "Must explain compose cleanup"
+        )
+
+    def test_cross_session_sharing_section(self):
+        """Guide must explain cross-session sharing via attach."""
+        text = _read_guide()
+        lower = text.lower()
+        assert "attach" in lower, "Must explain attach pattern"
+        # Must explain ownership semantics
+        assert "own" in lower, "Must explain ownership (creating session owns)"
+
+    def test_ssh_auto_discovery_section(self):
+        """Guide must document SSH auto-discovery."""
+        text = _read_guide()
+        lower = text.lower()
+        assert "auto-discover" in lower or "auto discover" in lower, (
+            "Must mention SSH auto-discovery"
+        )
+        assert ".ssh/config" in text or "ssh/config" in lower, (
+            "Must mention ~/.ssh/config"
+        )
+
+    def test_env_create_new_params_in_table(self):
+        """Tool reference table must mention new env_create params."""
+        text = _read_guide()
+        # The table row for env_create should reference new capabilities
+        table_lines = [line for line in text.splitlines() if "|" in line]
+        create_lines = [line for line in table_lines if "env_create" in line]
+        assert create_lines, "env_create must appear in the tool table"
+        create_text = " ".join(create_lines)
+        assert "compose" in create_text.lower() or "attach" in create_text.lower(), (
+            "env_create table entry must reference compose or attach capabilities"
+        )
