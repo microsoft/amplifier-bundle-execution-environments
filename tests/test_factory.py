@@ -1397,3 +1397,112 @@ class TestEnvCreateMountConfig:
             asyncio.run(mount(self.coordinator))
 
         assert captured_kwargs.get("backends") == ["local", "docker", "ssh"]
+
+
+# ---------------------------------------------------------------------------
+# Task 4: SSH connection classes consolidated import
+# ---------------------------------------------------------------------------
+
+
+class TestSSHConnectionClassesConsolidated:
+    """SSH connection classes importable from consolidated module path."""
+
+    def test_ssh_connection_config_importable_from_consolidated_path(self) -> None:
+        """SSHConnectionConfig is importable from amplifier_env_common.backends.ssh."""
+        from amplifier_env_common.backends.ssh import SSHConnectionConfig
+
+        config = SSHConnectionConfig(
+            host="example.com",
+            username="user",
+            key_file="/home/user/.ssh/id_ed25519",
+            known_hosts=None,
+        )
+        assert config.host == "example.com"
+        assert config.username == "user"
+        assert config.port == 22  # default
+
+    def test_async_ssh_backend_importable_from_consolidated_path(self) -> None:
+        """AsyncSSHBackend is importable from amplifier_env_common.backends.ssh."""
+        from amplifier_env_common.backends.ssh import (
+            AsyncSSHBackend,
+            SSHConnectionConfig,
+        )
+
+        config = SSHConnectionConfig(host="example.com")
+        backend = AsyncSSHBackend(config=config)
+        assert backend._config is config
+
+    def test_ssh_connection_importable_from_consolidated_path(self) -> None:
+        """SSHConnection is importable from amplifier_env_common.backends.ssh."""
+        from amplifier_env_common.backends.ssh import (
+            AsyncSSHBackend,
+            SSHConnection,
+            SSHConnectionConfig,
+        )
+
+        config = SSHConnectionConfig(host="example.com")
+        backend = AsyncSSHBackend(config=config)
+        conn = SSHConnection(config=config, backend=backend)
+        assert conn._config is config
+        assert conn._backend is backend
+
+
+class TestFactorySSHConsolidatedImport:
+    """Factory _create_ssh uses consolidated import path, not old package."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+        self.tool = EnvCreateTool(registry=self.registry, coordinator=self.coordinator)
+
+    def test_factory_no_reference_to_old_ssh_package(self) -> None:
+        """factory.py must not reference amplifier_module_tools_env_ssh."""
+        import inspect
+
+        source = inspect.getsource(EnvCreateTool)
+        assert "amplifier_module_tools_env_ssh" not in source
+
+    def test_factory_real_ssh_path_uses_consolidated_classes(self) -> None:
+        """The real SSH path (non-test-injection) imports from consolidated module."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        # Mock the SSH connection classes at the SOURCE module (lazy imports)
+        mock_config = MagicMock()
+        mock_async_backend = MagicMock()
+        mock_connection = MagicMock()
+        mock_connection.connect = AsyncMock()
+        mock_connection.exec_command = AsyncMock()
+        mock_connection.disconnect = AsyncMock()
+
+        with (
+            patch(
+                "amplifier_env_common.backends.ssh.SSHConnectionConfig",
+                return_value=mock_config,
+            ) as mock_config_cls,
+            patch(
+                "amplifier_env_common.backends.ssh.AsyncSSHBackend",
+                return_value=mock_async_backend,
+            ),
+            patch(
+                "amplifier_env_common.backends.ssh.SSHConnection",
+                return_value=mock_connection,
+            ),
+            patch(
+                "amplifier_module_tools_env_all.ssh_discovery.discover_ssh_config",
+                return_value={"username": "testuser", "resolved_host": "10.0.0.1"},
+            ),
+        ):
+            result = asyncio.run(
+                self.tool.execute(
+                    {
+                        "type": "ssh",
+                        "name": "real-ssh",
+                        "host": "myserver",
+                    }
+                )
+            )
+
+        assert result.success is True
+        # Verify the consolidated classes were used
+        mock_config_cls.assert_called_once()
+        mock_connection.connect.assert_called_once()
