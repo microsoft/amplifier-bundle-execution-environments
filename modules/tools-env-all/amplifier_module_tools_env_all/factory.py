@@ -432,8 +432,8 @@ class EnvCreateTool:
 
         # Real SSH connection path
         try:
-            from amplifier_module_tools_env_ssh.async_backend import AsyncSSHBackend
-            from amplifier_module_tools_env_ssh.connection import (
+            from amplifier_env_common.backends.ssh import (
+                AsyncSSHBackend,
                 SSHConnection,
                 SSHConnectionConfig,
             )

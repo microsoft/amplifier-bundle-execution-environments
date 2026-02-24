@@ -21,11 +21,103 @@ in env_create.
 
 from __future__ import annotations
 
+import dataclasses
 import shlex
 import time
 from typing import Any, Callable
 
 from ..models import EnvExecResult, EnvFileEntry
+
+
+# ---------------------------------------------------------------------------
+# SSH connection classes (depend on asyncssh at runtime, not import time)
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass
+class SSHConnectionConfig:
+    """Configuration for an SSH connection."""
+
+    host: str
+    port: int = 22
+    username: str | None = None
+    key_file: str | None = None
+    known_hosts: Any = None
+    connect_timeout: float = 30
+
+
+class AsyncSSHBackend:
+    """Low-level SSH backend that wraps asyncssh.connect().
+
+    The ``asyncssh`` library is imported lazily inside :meth:`connect` so
+    that importing this class does **not** require asyncssh to be installed.
+    """
+
+    def __init__(self, config: SSHConnectionConfig) -> None:
+        self._config = config
+
+    async def connect(self) -> Any:
+        """Open an asyncssh connection using the stored config."""
+        import asyncssh  # lazy — ImportError caught by callers
+
+        connect_kwargs: dict[str, Any] = {
+            "host": self._config.host,
+            "port": self._config.port,
+            "known_hosts": self._config.known_hosts,
+        }
+        if self._config.username:
+            connect_kwargs["username"] = self._config.username
+        if self._config.key_file:
+            connect_kwargs["client_keys"] = [self._config.key_file]
+        if self._config.connect_timeout:
+            connect_kwargs["login_timeout"] = self._config.connect_timeout
+
+        return await asyncssh.connect(**connect_kwargs)
+
+
+class SSHConnection:
+    """High-level SSH connection that provides exec_command / disconnect.
+
+    Wraps an :class:`AsyncSSHBackend` connection and exposes the interface
+    expected by :class:`SSHBackendWrapper` (``exec_fn`` / ``disconnect_fn``).
+    """
+
+    def __init__(
+        self,
+        config: SSHConnectionConfig,
+        backend: AsyncSSHBackend,
+    ) -> None:
+        self._config = config
+        self._backend = backend
+        self._conn: Any = None
+
+    async def connect(self) -> None:
+        """Establish the SSH connection."""
+        self._conn = await self._backend.connect()
+
+    async def exec_command(
+        self, cmd: str, timeout: float | None = None
+    ) -> EnvExecResult:
+        """Execute *cmd* on the remote host and return structured output."""
+        if self._conn is None:
+            raise RuntimeError("SSHConnection is not connected; call connect() first")
+        result = await self._conn.run(cmd, timeout=timeout)
+        return EnvExecResult(
+            stdout=str(result.stdout) if result.stdout else "",
+            stderr=str(result.stderr) if result.stderr else "",
+            exit_code=result.exit_status if result.exit_status is not None else 0,
+        )
+
+    async def disconnect(self) -> None:
+        """Close the SSH connection."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+
+
+# ---------------------------------------------------------------------------
+# SSHBackendWrapper — exec-function based backend (no asyncssh dependency)
+# ---------------------------------------------------------------------------
 
 
 class SSHBackendWrapper:
