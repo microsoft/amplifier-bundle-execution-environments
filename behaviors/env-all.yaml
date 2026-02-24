@@ -5,7 +5,7 @@ bundle:
 
 tools:
   - module: tools-env-all
-    source: git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=modules/tools-env-all
+    source: git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#subdirectory=modules/tools-env-all
     config:
       backends:
         - local
@@ -15,12 +15,12 @@ tools:
 
 hooks:
   - module: hooks-env-all
-    source: git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=modules/hooks-env-all
+    source: git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#subdirectory=modules/hooks-env-all
     config: {}
 
 context:
   include:
-    - git+https://github.com/bkrabach/amplifier-bundle-env-all@main#path=context/env-core-guide.md
-    - git+https://github.com/bkrabach/amplifier-bundle-env-all@main#path=context/env-docker-guide.md
-    - git+https://github.com/bkrabach/amplifier-bundle-env-all@main#path=context/env-ssh-guide.md
-    - git+https://github.com/bkrabach/amplifier-bundle-env-all@main#path=context/env-security-guide.md
+    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-core-guide.md
+    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-docker-guide.md
+    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-ssh-guide.md
+    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-security-guide.md

@@ -5,7 +5,7 @@ bundle:
 
 tools:
   - module: tools-env-all
-    source: git+https://github.com/bkrabach/amplifier-bundle-env-all@main#subdirectory=modules/tools-env-all
+    source: git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#subdirectory=modules/tools-env-all
     config:
       enable_security: true
 
@@ -13,4 +13,4 @@ hooks: []
 
 context:
   include:
-    - git+https://github.com/bkrabach/amplifier-bundle-env-all@main#path=context/env-security-guide.md
+    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-security-guide.md
