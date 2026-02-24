@@ -276,7 +276,8 @@ class TestEnvCreateErrors:
     def test_unknown_type_returns_error(self) -> None:
         result = asyncio.run(self.tool.execute({"type": "banana", "name": "test"}))
         assert result.success is False
-        assert "unknown" in result.error["message"].lower()
+        assert "banana" in result.error["message"].lower()
+        assert "not enabled" in result.error["message"].lower()
 
     def test_instance_appears_in_registry(self) -> None:
         """After create, registry.get(name) returns a backend."""
@@ -1183,3 +1184,216 @@ class TestEnvCreateReadOnlyWrapper:
 
         with pytest.raises(PermissionError, match="read-only"):
             asyncio.run(backend.write_file("/tmp/blocked.txt", "nope"))
+
+
+# ---------------------------------------------------------------------------
+# Phase 4.4 Slice B: Dynamic tool schema based on config
+# ---------------------------------------------------------------------------
+
+
+class TestEnvCreateDynamicSchemaType:
+    """B.2: input_schema type enum matches configured backends."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+
+    def test_schema_type_enum_matches_backends_local_only(self) -> None:
+        """backends=["local"] → type enum is ["local"]."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["local"]
+        )
+        props = tool.input_schema["properties"]
+        assert props["type"]["enum"] == ["local"]
+
+    def test_schema_type_enum_matches_backends_all(self) -> None:
+        """backends=["local","docker","ssh"] → type enum has all 3."""
+        tool = EnvCreateTool(
+            registry=self.registry,
+            coordinator=self.coordinator,
+            backends=["local", "docker", "ssh"],
+        )
+        props = tool.input_schema["properties"]
+        assert props["type"]["enum"] == ["local", "docker", "ssh"]
+
+
+class TestEnvCreateDynamicSchemaExclusion:
+    """B.2: Schema excludes params for disabled backends."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+
+    def test_schema_local_only_excludes_docker_params(self) -> None:
+        """backends=["local"] → no purpose, compose_files, attach_to."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["local"]
+        )
+        props = tool.input_schema["properties"]
+        assert "purpose" not in props
+        assert "compose_files" not in props
+        assert "attach_to" not in props
+
+    def test_schema_local_only_excludes_ssh_params(self) -> None:
+        """backends=["local"] → no host, username, key_file."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["local"]
+        )
+        props = tool.input_schema["properties"]
+        assert "host" not in props
+        assert "username" not in props
+        assert "key_file" not in props
+
+    def test_schema_docker_includes_compose_params(self) -> None:
+        """backends includes "docker" → compose_files, attach_to present."""
+        tool = EnvCreateTool(
+            registry=self.registry,
+            coordinator=self.coordinator,
+            backends=["docker"],
+        )
+        props = tool.input_schema["properties"]
+        assert "compose_files" in props
+        assert "attach_to" in props
+        assert "purpose" in props
+
+    def test_schema_ssh_includes_ssh_params(self) -> None:
+        """backends includes "ssh" → host, username, key_file present."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["ssh"]
+        )
+        props = tool.input_schema["properties"]
+        assert "host" in props
+        assert "username" in props
+        assert "key_file" in props
+
+
+class TestEnvCreateDynamicSchemaSecurity:
+    """B.2: Security config controls env_policy and wrappers in schema."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+
+    def test_schema_security_disabled_excludes_env_policy(self) -> None:
+        """enable_security=False → no env_policy, no wrappers."""
+        tool = EnvCreateTool(
+            registry=self.registry,
+            coordinator=self.coordinator,
+            enable_security=False,
+        )
+        props = tool.input_schema["properties"]
+        assert "env_policy" not in props
+        assert "wrappers" not in props
+
+    def test_schema_security_enabled_includes_env_policy(self) -> None:
+        """enable_security=True → env_policy, wrappers present."""
+        tool = EnvCreateTool(
+            registry=self.registry,
+            coordinator=self.coordinator,
+            enable_security=True,
+        )
+        props = tool.input_schema["properties"]
+        assert "env_policy" in props
+        assert "wrappers" in props
+
+
+class TestEnvCreateDynamicDescription:
+    """B.2: Description mentions only available backends."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+
+    def test_description_mentions_available_backends(self) -> None:
+        """backends=["local","docker"] → description mentions both."""
+        tool = EnvCreateTool(
+            registry=self.registry,
+            coordinator=self.coordinator,
+            backends=["local", "docker"],
+        )
+        desc = tool.description
+        assert "'local'" in desc
+        assert "'docker'" in desc
+
+    def test_description_local_only_no_docker_mention(self) -> None:
+        """backends=["local"] → no "Docker" or "compose" in description."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["local"]
+        )
+        desc = tool.description
+        assert "Docker" not in desc
+        assert "compose" not in desc
+
+
+class TestEnvCreateDisabledBackendError:
+    """B.3: Calling env_create with a disabled backend returns error."""
+
+    def setup_method(self) -> None:
+        self.registry = EnvironmentRegistry()
+        self.coordinator = MockCoordinator()
+
+    def test_disabled_backend_returns_error(self) -> None:
+        """backends=["local"], try type="docker" → ToolResult(success=False)."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["local"]
+        )
+        result = asyncio.run(tool.execute({"type": "docker", "name": "build"}))
+        assert result.success is False
+
+    def test_disabled_backend_error_lists_available(self) -> None:
+        """Error message includes available backends."""
+        tool = EnvCreateTool(
+            registry=self.registry, coordinator=self.coordinator, backends=["local"]
+        )
+        result = asyncio.run(tool.execute({"type": "docker", "name": "build"}))
+        assert result.success is False
+        assert result.error is not None
+        assert "local" in result.error["message"]
+        assert "docker" in result.error["message"]
+        assert "not enabled" in result.error["message"].lower()
+
+
+class TestEnvCreateMountConfig:
+    """B.1: mount() passes backends and enable_security to EnvCreateTool."""
+
+    def setup_method(self) -> None:
+        self.coordinator = MockCoordinator()
+
+    def test_mount_passes_backends_to_env_create(self) -> None:
+        """mount with config={"backends": ["local"]} creates tool with correct backends."""
+        from unittest.mock import AsyncMock, patch
+
+        # Track what EnvCreateTool gets instantiated with
+        captured_kwargs: dict[str, Any] = {}
+        original_init = EnvCreateTool.__init__
+
+        def capturing_init(self_tool: Any, **kwargs: Any) -> None:
+            captured_kwargs.update(kwargs)
+            original_init(self_tool, **kwargs)
+
+        with patch.object(EnvCreateTool, "__init__", capturing_init):
+            self.coordinator.mount = AsyncMock()  # type: ignore[attr-defined]
+            from amplifier_module_tools_env_all import mount
+
+            asyncio.run(mount(self.coordinator, config={"backends": ["local"]}))
+
+        assert captured_kwargs.get("backends") == ["local"]
+
+    def test_mount_default_backends_all(self) -> None:
+        """mount with no config defaults to ["local","docker","ssh"]."""
+        from unittest.mock import AsyncMock, patch
+
+        captured_kwargs: dict[str, Any] = {}
+        original_init = EnvCreateTool.__init__
+
+        def capturing_init(self_tool: Any, **kwargs: Any) -> None:
+            captured_kwargs.update(kwargs)
+            original_init(self_tool, **kwargs)
+
+        with patch.object(EnvCreateTool, "__init__", capturing_init):
+            self.coordinator.mount = AsyncMock()  # type: ignore[attr-defined]
+            from amplifier_module_tools_env_all import mount
+
+            asyncio.run(mount(self.coordinator))
+
+        assert captured_kwargs.get("backends") == ["local", "docker", "ssh"]

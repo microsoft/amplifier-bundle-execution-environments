@@ -1,7 +1,7 @@
 bundle:
-  name: behavior-env-all
+  name: behavior-env-docker
   version: 0.2.0
-  description: Complete execution environment toolkit — local, Docker, SSH with security
+  description: Local and Docker execution environment tools with compose support
 
 tools:
   - module: tools-env-all
@@ -10,8 +10,7 @@ tools:
       backends:
         - local
         - docker
-        - ssh
-      enable_security: true
+      enable_security: false
 
 hooks:
   - module: hooks-env-all
@@ -22,5 +21,3 @@ context:
   include:
     - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-core-guide.md
     - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-docker-guide.md
-    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-ssh-guide.md
-    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-security-guide.md

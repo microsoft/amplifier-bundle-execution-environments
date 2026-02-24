@@ -1,0 +1,10 @@
+[project]
+name = "amplifier-env-common"
+version = "0.1.0"
+description = "Shared models and schemas for the execution environment ecosystem"
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.0.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

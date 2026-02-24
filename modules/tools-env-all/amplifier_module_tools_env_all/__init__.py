@@ -40,6 +40,8 @@ async def mount(
     from .management import EnvDestroyTool, EnvListTool
 
     config = config or {}
+    backends = config.get("backends", ["local", "docker", "ssh"])
+    enable_security = config.get("enable_security", True)
 
     # Get-or-create shared registry (handles mount ordering — hooks may mount after tools)
     registry = coordinator.get_capability("env_registry")
@@ -57,7 +59,12 @@ async def mount(
 
     # Create all 11 tools
     all_tools = [
-        EnvCreateTool(registry=registry, coordinator=coordinator),
+        EnvCreateTool(
+            registry=registry,
+            coordinator=coordinator,
+            backends=backends,
+            enable_security=enable_security,
+        ),
         EnvDestroyTool(registry=registry),
         EnvListTool(registry=registry),
         EnvExecTool(registry=registry),

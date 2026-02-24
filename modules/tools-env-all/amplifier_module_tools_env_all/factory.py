@@ -17,9 +17,17 @@ logger = logging.getLogger(__name__)
 class EnvCreateTool:
     """Factory tool: creates named environment instances on demand."""
 
-    def __init__(self, registry: EnvironmentRegistry, coordinator: Any) -> None:
+    def __init__(
+        self,
+        registry: EnvironmentRegistry,
+        coordinator: Any,
+        backends: list[str] | None = None,
+        enable_security: bool = True,
+    ) -> None:
         self._registry = registry
         self._coordinator = coordinator
+        self._backends = backends or ["local", "docker", "ssh"]
+        self._enable_security = enable_security
 
     @property
     def name(self) -> str:
@@ -27,87 +35,117 @@ class EnvCreateTool:
 
     @property
     def description(self) -> str:
-        return (
-            "Create a new execution environment instance. "
-            "Types: 'local' (host filesystem), 'docker' (container), 'ssh' (remote host). "
+        type_desc = ", ".join(f"'{b}'" for b in self._backends)
+        desc = (
+            f"Create a new execution environment instance. "
+            f"Types: {type_desc}. "
             "Returns the instance name for use with other env_* tools."
         )
+        if "docker" in self._backends:
+            desc += (
+                " Docker supports compose stacks and attaching to existing containers."
+            )
+        if "ssh" in self._backends:
+            desc += " SSH auto-discovers credentials from ~/.ssh/config."
+        if self._enable_security:
+            desc += " Supports env_policy for variable filtering and wrappers for logging/readonly."
+        return desc
 
     @property
     def input_schema(self) -> dict:
-        return {
-            "type": "object",
-            "properties": {
-                "type": {
-                    "type": "string",
-                    "enum": ["local", "docker", "ssh"],
-                    "description": "Environment type to create",
-                },
-                "name": {
-                    "type": "string",
-                    "description": "Instance name (you choose — e.g., 'build-server', 'pi')",
-                },
-                "purpose": {
-                    "type": "string",
-                    "description": "Docker: container purpose/base image (default: 'python')",
-                },
-                "host": {
-                    "type": "string",
-                    "description": "SSH: hostname or IP (required for ssh type)",
-                },
-                "username": {
-                    "type": "string",
-                    "description": "SSH: username (optional)",
-                },
-                "key_file": {
-                    "type": "string",
-                    "description": "SSH: path to private key (optional)",
-                },
-                "working_dir": {
-                    "type": "string",
-                    "description": "Local: base directory for operations (default: cwd)",
-                },
-                "compose_files": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Docker: compose file paths to bring up a multi-service stack",
-                },
-                "compose_project": {
-                    "type": "string",
-                    "description": "Docker: compose project name for namespace isolation and teardown",
-                },
-                "attach_to": {
-                    "type": "string",
-                    "description": (
-                        "Docker: service name (with compose) or container ID (without compose) "
-                        "to attach to instead of creating a new container"
-                    ),
-                },
-                "health_check": {
-                    "type": "boolean",
-                    "description": "Docker: wait for target container to be healthy before returning (default: false)",
-                },
-                "health_timeout": {
-                    "type": "integer",
-                    "description": "Docker: seconds to wait for health check (default: 60)",
-                },
-                "env_policy": {
-                    "type": "string",
-                    "enum": ["inherit_all", "core_only", "inherit_none"],
-                    "description": "Environment variable inheritance policy (default: core_only). Controls which host vars are visible to commands.",
-                },
-                "wrappers": {
-                    "type": "array",
-                    "items": {"type": "string", "enum": ["logging", "readonly"]},
-                    "description": "Composable wrappers to apply (e.g., ['logging', 'readonly'])",
-                },
+        props: dict[str, Any] = {
+            "type": {
+                "type": "string",
+                "enum": self._backends,
+                "description": "Environment type to create",
             },
-            "required": ["type", "name"],
+            "name": {
+                "type": "string",
+                "description": "Instance name (you choose — e.g., 'build-server', 'pi')",
+            },
         }
+
+        if "local" in self._backends:
+            props["working_dir"] = {
+                "type": "string",
+                "description": "Local: base directory for operations (default: cwd)",
+            }
+
+        if "docker" in self._backends:
+            props["purpose"] = {
+                "type": "string",
+                "description": "Docker: container purpose/base image (default: 'python')",
+            }
+            props["compose_files"] = {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Docker: compose file paths to bring up a multi-service stack",
+            }
+            props["compose_project"] = {
+                "type": "string",
+                "description": "Docker: compose project name for namespace isolation and teardown",
+            }
+            props["attach_to"] = {
+                "type": "string",
+                "description": (
+                    "Docker: service name (with compose) or container ID (without compose) "
+                    "to attach to instead of creating a new container"
+                ),
+            }
+            props["health_check"] = {
+                "type": "boolean",
+                "description": "Docker: wait for target container to be healthy before returning (default: false)",
+            }
+            props["health_timeout"] = {
+                "type": "integer",
+                "description": "Docker: seconds to wait for health check (default: 60)",
+            }
+            props["persistent"] = {
+                "type": "boolean",
+                "description": "Docker: survive session cleanup (default: false)",
+            }
+
+        if "ssh" in self._backends:
+            props["host"] = {
+                "type": "string",
+                "description": "SSH: hostname or IP (required for ssh type)",
+            }
+            props["username"] = {
+                "type": "string",
+                "description": "SSH: username (auto-discovered if not provided)",
+            }
+            props["key_file"] = {
+                "type": "string",
+                "description": "SSH: path to private key (auto-discovered if not provided)",
+            }
+
+        if self._enable_security:
+            props["env_policy"] = {
+                "type": "string",
+                "enum": ["inherit_all", "core_only", "inherit_none"],
+                "description": "Environment variable filtering policy (default: core_only)",
+            }
+            props["wrappers"] = {
+                "type": "array",
+                "items": {"type": "string", "enum": ["logging", "readonly"]},
+                "description": "Composable wrappers to apply",
+            }
+
+        return {"type": "object", "properties": props, "required": ["type", "name"]}
 
     async def execute(self, input: dict[str, Any]) -> ToolResult:
         env_type = input.get("type")
         env_name = input.get("name")
+
+        if env_type and env_type not in self._backends:
+            return ToolResult(
+                success=False,
+                error={
+                    "message": f"Backend '{env_type}' is not enabled. "
+                    f"Available: {self._backends}. "
+                    f"Install a behavior that includes this backend."
+                },
+            )
 
         if not env_type:
             return ToolResult(

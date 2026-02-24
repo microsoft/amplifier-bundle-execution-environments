@@ -1,0 +1,16 @@
+bundle:
+  name: behavior-env-security
+  version: 0.2.0
+  description: Environment variable filtering and composable wrappers (logging, readonly)
+
+tools:
+  - module: tools-env-all
+    source: git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#subdirectory=modules/tools-env-all
+    config:
+      enable_security: true
+
+hooks: []
+
+context:
+  include:
+    - git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#path=context/env-security-guide.md

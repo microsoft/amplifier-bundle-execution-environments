@@ -3,14 +3,11 @@ name = "amplifier-module-tools-env-all"
 version = "0.2.0"
 description = "Instance-based execution environment tools — create, destroy, list, and 8 common-shape dispatch tools"
 requires-python = ">=3.11"
-dependencies = ["amplifier-env-common @ git+https://github.com/microsoft/amplifier-env-common@main"]
+dependencies = ["amplifier-env-common"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [project.entry-points."amplifier.modules"]
 tools-env-all = "amplifier_module_tools_env_all:mount"

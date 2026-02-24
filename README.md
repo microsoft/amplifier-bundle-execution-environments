@@ -7,7 +7,7 @@ Provides 11 tools for creating and managing named environment instances on deman
 ## Installation
 
 ```bash
-amplifier bundle add "git+https://github.com/microsoft/amplifier-bundle-env-all@main#subdirectory=behaviors/env-all.yaml" --app
+amplifier bundle add "git+https://github.com/microsoft/amplifier-bundle-execution-environments@main#subdirectory=env-all/behaviors/env-all.yaml" --app
 ```
 
 ## Tools Provided (11)
@@ -61,7 +61,7 @@ This bundle follows the [thin bundle pattern](https://github.com/microsoft/ampli
 - **`modules/tools-env-all/`** — Tool module (11 tools, dispatches to backends)
 - **`modules/hooks-env-all/`** — Hook module (session cleanup)
 - **`context/env-all-guide.md`** — Agent context guide
-- **[`amplifier-env-common`](https://github.com/microsoft/amplifier-env-common)** — Shared library (protocol, models, backends)
+- **`lib/` (`amplifier-env-common`)** — Shared library (protocol, models, backends)
 
 ## Testing
 
