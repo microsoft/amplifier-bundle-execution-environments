@@ -13,6 +13,16 @@ BEHAVIORS = ENV_ALL / "behaviors"
 CONTEXT = ENV_ALL / "context"
 BUNDLE_MD = ENV_ALL / "bundle.md"
 
+# Base URL used for git+https context includes in behavior YAMLs
+REPO_BASE_URL = (
+    "git+https://github.com/microsoft/amplifier-bundle-execution-environments@main"
+)
+
+
+def _guide_url(guide_path: str) -> str:
+    """Build the full git+https URL for a context guide path."""
+    return f"{REPO_BASE_URL}#path={guide_path}"
+
 
 def _load_yaml(path: Path) -> dict:
     """Load a YAML file."""
@@ -80,10 +90,10 @@ class TestEnvAllYAMLUpdated:
         data = _load_yaml(BEHAVIORS / "env-all.yaml")
         includes = data.get("context", {}).get("include", [])
         expected = [
-            "env-all:context/env-core-guide.md",
-            "env-all:context/env-docker-guide.md",
-            "env-all:context/env-ssh-guide.md",
-            "env-all:context/env-security-guide.md",
+            _guide_url("context/env-core-guide.md"),
+            _guide_url("context/env-docker-guide.md"),
+            _guide_url("context/env-ssh-guide.md"),
+            _guide_url("context/env-security-guide.md"),
         ]
         for guide in expected:
             assert guide in includes, (
@@ -113,7 +123,7 @@ class TestBehaviorContent:
     def test_env_core_yaml_only_includes_core_guide(self):
         data = _load_yaml(BEHAVIORS / "env-core.yaml")
         includes = data.get("context", {}).get("include", [])
-        assert includes == ["env-all:context/env-core-guide.md"], (
+        assert includes == [_guide_url("context/env-core-guide.md")], (
             f"env-core.yaml must include only core guide, got {includes}"
         )
 
@@ -126,8 +136,8 @@ class TestBehaviorContent:
     def test_env_docker_yaml_includes_core_and_docker(self):
         data = _load_yaml(BEHAVIORS / "env-docker.yaml")
         includes = data.get("context", {}).get("include", [])
-        assert "env-all:context/env-core-guide.md" in includes
-        assert "env-all:context/env-docker-guide.md" in includes
+        assert _guide_url("context/env-core-guide.md") in includes
+        assert _guide_url("context/env-docker-guide.md") in includes
         assert len(includes) == 2
 
     def test_env_docker_yaml_has_local_and_docker(self):
@@ -138,8 +148,8 @@ class TestBehaviorContent:
     def test_env_ssh_yaml_includes_core_and_ssh(self):
         data = _load_yaml(BEHAVIORS / "env-ssh.yaml")
         includes = data.get("context", {}).get("include", [])
-        assert "env-all:context/env-core-guide.md" in includes
-        assert "env-all:context/env-ssh-guide.md" in includes
+        assert _guide_url("context/env-core-guide.md") in includes
+        assert _guide_url("context/env-ssh-guide.md") in includes
         assert len(includes) == 2
 
     def test_env_ssh_yaml_has_local_and_ssh(self):
@@ -150,7 +160,7 @@ class TestBehaviorContent:
     def test_env_security_yaml_includes_only_security_guide(self):
         data = _load_yaml(BEHAVIORS / "env-security.yaml")
         includes = data.get("context", {}).get("include", [])
-        assert includes == ["env-all:context/env-security-guide.md"]
+        assert includes == [_guide_url("context/env-security-guide.md")]
 
     def test_env_security_yaml_has_security_enabled(self):
         data = _load_yaml(BEHAVIORS / "env-security.yaml")
